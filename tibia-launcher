@@ -1,0 +1,276 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+import argparse
+import tarfile
+
+try:
+    from urllib.request import urlopen # Python 3
+except ImportError:
+    from urllib2 import urlopen # Python 2
+
+if sys.version_info[0] < 3:
+    input = raw_input
+
+__author__ = 'born2discover <me@born2discover.ch>'
+__license__ = 'MIT'
+__version__ = '1.0.0'
+__maintainer__ = 'born2discover'
+__email__ = 'me@born2discover.ch'
+
+CLIENT_URL = 'http://download.tibia.com/tibia.x64.tar.gz'
+MAPS_URL = 'https://tibiamaps.github.io/tibia-map-data/minimap-without-markers.zip'
+MAPS_WITH_MARKERS = 'https://tibiamaps.github.io/tibia-map-data/minimap-with-markers.zip'
+
+format_base = lambda prog: argparse.HelpFormatter(prog, indent_increment=0, max_help_position=50, width=500)
+launcher = argparse.ArgumentParser(
+    prog='tibia-launcher',
+    description='A python utility handling installation, update and removal of the Linux Client for MMORPG Tibia',
+    epilog='Homepage: https://github.com/born2discover/tibia-launcher',
+    formatter_class=format_base)
+
+commands = launcher.add_subparsers(title='commands', dest='command', metavar='')
+
+install = commands.add_parser('install',
+    help='install the latest client from the official website',
+    usage='{0} install [--path PATH]'.format(launcher.prog),
+    formatter_class=format_base)
+install.add_argument('--path',
+    action='store',
+    default=os.path.join( os.getcwd(), 'tibia'),
+    help='path where to install the client, defaults to ./tibia')
+
+update  = commands.add_parser('update',
+    help='update installed client to the latest version',
+    formatter_class=format_base)
+update.add_argument('--path',
+    action='store',
+    default=os.path.join( os.getcwd(), 'tibia'),
+    help='path where to install the client, defaults to ./tibia')
+
+delete  = commands.add_parser('uninstall',
+    help='remove installed client and all of its files, this action preserves minimap, characterdata and conf',
+    formatter_class=format_base)
+delete.add_argument('--purge',
+    action='store_true',
+    help='delete user data directories as well')
+
+play = commands.add_parser('play', help='start the game client by invoking the start-tibia.sh scrip')
+maps = commands.add_parser('install_maps', help='install minimap files from TibiaMaps.io project')
+maps.add_argument('--with-markers', action='store_true', help='')
+
+infinality = commands.add_parser('fontfix', help='apply infinality font rendering fix')
+infinality.add_argument('value', help='infinality font rendering fix value: 35, 38 or 40')
+
+selfupdate = commands.add_parser('selfupdate', help='update tibia-launcher from github (requires git)')
+launcher.add_argument('-v', '--version', action='version', version=__version__)
+
+
+def download_archive(url, destination, chunk_size=8*1024):
+    """
+    Downloads a file from the provided url to the destination file
+
+    :param url str: url from which to download the file
+    :param destination str: destination path
+    :param chunk_size int: the size of the binary chunks to read per iteration
+    """
+    request = urlopen(url)
+    file_size = int(request.info().getheader('Content-Length').strip())
+    progress = 0
+
+    def progress_reporter(count, total, bar_len=50):
+        """
+        Display a nicely formatted progress bar
+
+        :param count int: the amount of already data
+        :param total int: the overall size of the data
+        :param bar_len int: the overall size of the progress bar
+        """
+        filled_len = int(round(bar_len * count / float(total)))
+        percents = round(100.0 * count / float(total), 1)
+        bar = '='*filled_len + '-'*(bar_len - filled_len)
+        sys.stdout.write('\r=> [{bar}] {percents}% '.format(bar=bar, percents=percents))
+
+        if (total - count) < 0:
+            sys.stdout.write('\n')
+        sys.stdout.flush()
+
+    with open(destination, 'wb') as fp:
+        for chunk in iter(lambda: request.read(chunk_size), ''):
+            fp.write(chunk)
+            progress += chunk_size
+            progress_reporter(progress, file_size)
+
+def client_version(client_file):
+    """
+    Extracts the client version from the Tibia.x64.tar.gz file, that is the name of the topmost directory in the archive
+
+    :param client_file str: path to the client archive
+    :return: the version string, ex: tibia-aa.bb.cccc
+    """
+    with tarfile.open(client_file) as fp:
+        version = os.path.commonprefix(fp.getnames())
+    return version
+
+def infinality_fix(start_file, fix_value):
+    fix = 'export FREETYPE_PROPERTIES="truetype:interpreter-version={0}"\n'.format( fix_value )
+    os.system("sed -i '/FREETYPE_PROPERTIES/d' {0}".format( start_file ))
+    os.system("sed -i '$ i\{0}' {1}".format( fix, start_file ))
+
+
+if __name__ == '__main__':
+    args = launcher.parse_args()
+
+    app_dir = os.getcwd()
+    if os.path.exists(os.path.join( app_dir, 'PATH' )):
+        with open(os.path.join( app_dir, 'PATH' ), 'r') as fd:
+            game_dir = fd.read().strip()
+    else:
+        game_dir = os.path.join(app_dir, 'tibia')
+
+    app_path = lambda path: os.path.join(app_dir, path)
+    game_path = lambda path: os.path.join(game_dir, path)
+
+    is_installed = lambda: os.path.exists(os.path.join( app_dir,'VERSION' ))
+
+    user_data = ['characterdata', 'minimap', 'conf']
+
+    """
+    Tibia-launcher commands
+    """
+    if args.command in ['install', 'update']:
+        """
+        installation and update
+        """
+        game_dir = args.path
+
+        if is_installed() and args.command == 'install':
+            print('=> It seems that the client is already installed on your system')
+            print('=> In order to force a re-installation, please remove the VERSION file or run:')
+            print('=> $ {0} uninstall'.format(launcher.prog))
+            print('=> Installation aborted.')
+            sys.exit(1)
+
+        if not is_installed() and args.command == 'update':
+            print('=> It seems that the client is not installed on your system')
+            print('=> Please run the instllation command first:')
+            print('=> $ {0} install'.format(launcher.prog))
+            print('=> Update aborted.')
+            sys.exit(2)
+
+        print('=> Downloading the latest client version')
+        client_file = app_path('Tibia.x64.tar.gz')
+        download_archive(CLIENT_URL,client_file )
+        current_version = client_version( client_file )
+        print('=> Current version: {0}'.format(current_version))
+
+        if args.command == 'update':
+            with open( app_path('VERSION'),'r' ) as fd:
+                installed_version = fd.read().strip()
+
+            if installed_version == current_version:
+                print('=> Installed version is the current one')
+                print('=> No update required')
+                print('=> Cleaning up')
+                os.system('rm -f {0}'.format( client_file ))
+                sys.exit(0)
+
+            print("=> Removing user data directories' symbolic links")
+            for direcory in user_data:
+                os.system('rm -f {0}'.format( game_path(direcory) ))
+
+            print('=> Removing the old client direcory and files')
+            os.system('rm -rf {0}'.format( game_dir ))
+
+        print('=> Extracting latest client files')
+        os.system('tar -zxf {0}'.format( client_file ))
+
+        print('=> Moving files to the correct location')
+        os.system('mv {source} {destination}'.format( source=app_path(current_version), destination=game_dir ))
+
+        if args.command == 'install':
+            print('=> Creating user data directories')
+            for direcory in user_data:
+                os.system('mkdir -p {0}'.format( app_path(direcory) ))
+
+        print('=> Creating symbolic links for user data directories')
+        for direcory in user_data:
+            os.system('ln -s {source} {destination}'.format(
+                source=app_path(direcory),
+                destination=game_path(direcory) ))
+
+        print('=> Regisering latest version: {0}'.format( current_version ))
+        os.system('echo "{0}" > VERSION'.format( current_version ))
+        os.system('echo "{0}" > PATH'.format( game_dir ))
+
+        print('=> Cleaning up')
+        os.system('rm -f {0}'.format( client_file ))
+
+    elif args.command == 'install_maps':
+        """
+        Map installation
+        """
+        url = MAPS_WITH_MARKERS if args.with_markers else MAPS_URL
+
+        print('=> Downloaing latest map archive from: {0}'.format( url ))
+        download_archive(url, app_path('maps.zip'))
+
+        print('=> Extracting minimap files')
+        os.system('rm -rf {0}'.format( app_path('minimap') ))
+        os.system('unzip -oq maps.zip' )
+
+        print('=> Cleaning up')
+        os.system('rm -f maps.zip')
+
+    elif args.command == 'play':
+        """
+        Client initialisation
+        """
+        print('=> Starting the game client')
+        os.system( game_path('start-tibia.sh 1> /dev/null') )
+
+    elif args.command == 'fontfix':
+        """
+        infinality font rendering fix
+        """
+        print('Appending infinality font rendering fix to start-tibia.sh')
+        infinality_fix( game_path('start-tibia.sh'), args.value )
+        print('Done')
+
+    elif args.command == 'uninstall':
+        """
+        Client uninstall process
+        """
+        print('=> Removing user data symbolic links')
+        for direcory in user_data:
+            os.system('rm -f {0}'.format( game_path(direcory) ))
+
+        print('=> Removing the client direcory and all of its files')
+        os.system('rm -rf {0}'.format( game_dir ))
+
+        if args.purge:
+            print('=> Purging user data directories and their content')
+            for direcory in user_data:
+                os.system('rm -rf {0}'.format( app_path(direcory) ))
+
+        print('=> Removing utility files')
+        os.system('rm -f {0}'.format( app_path('VERSION') ))
+        os.system('rm -f {0}'.format( app_path('PATH') ))
+
+        print('=> Client successfuly uninstalled')
+
+    elif args.command == 'selfupdate':
+        """
+        Selfupdate
+        """
+        if os.path.exists(os.path.join(os.getcwd(), '.git')):
+            print('Updating {0} to the latest version'.format(launcher.prog))
+            os.system('git pull -q origin master')
+        else:
+            print('=> No git repositry found, either it was removed or {0} was installed manually'.format( launcher.prog ))
+            print('=> Selfupdate is only available with {0} git installation and requires git'.format( launcher.prog ))
+
+    else:
+        print('Error: Unknow command or badly parsed arguments!')
