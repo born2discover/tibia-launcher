@@ -2,6 +2,9 @@
 
 ![code size](https://img.shields.io/github/languages/code-size/born2discover/tibia-launcher.svg) ![version](https://img.shields.io/badge/version-1.0.0-blue.svg) ![license](https://img.shields.io/github/license/born2discover/tibia-launcher.svg)
 
+## Deprecated
+**This piece of software has been deprecated. No further development will occur. As of [24 July 2018](https://secure.tibia.com/news/?subtopic=newsarchive&id=4692) the official Linux client has all the features that were previously provided by this tool, thus the need for it has expired.**
+
 A python utility aimed at simplifying installation, update and launch of the Linux client for MMORPG Tibia.
 
 As opposed to Windows and Mac clients, the Linux client for MMORPG Tibia does not have a launcher applications attached to it and thus does not have an auto-update feature. Hence each time there is an in-game update, Linux users must re-download the game client from the official website. That can become tedious, particularly if one wants to preserve their user configuration files (character options, mini-map files and client options) in-between updates.
